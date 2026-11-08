@@ -62,11 +62,18 @@ object AudioRouting {
      * cap. On these devices the "speaker" route is the hi-fi DAC.
      */
     val isHifiDap: Boolean by lazy {
-        val maker = "${Build.MANUFACTURER.orEmpty()} ${Build.BRAND.orEmpty()}".lowercase()
+        // Vendors put their name in different fields: the JM21 reports "FiiO JM21"
+        // as its model while manufacturer/brand can be the SoC vendor. Look at all
+        // of them, with spaces/dashes dropped ("Jade Audio" -> "jadeaudio").
+        val haystack = listOf(Build.MANUFACTURER, Build.BRAND, Build.MODEL, Build.PRODUCT, Build.DEVICE)
+            .joinToString("|") { it.orEmpty() }
+            .lowercase()
+            .replace(" ", "")
+            .replace("-", "")
         val model = Build.MODEL.orEmpty().lowercase()
         listOf("fiio", "jadeaudio", "hiby", "shanling", "ibasso", "cayin", "astell", "iriver", "questyle")
-            .any { it in maker } ||
-            (maker.contains("sony") && model.startsWith("nw-"))
+            .any { it in haystack } ||
+            (haystack.contains("sony") && model.startsWith("nw-"))
     }
 
     /** Output kinds worth telling apart on screen, in the order they are listed. */

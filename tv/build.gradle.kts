@@ -90,6 +90,8 @@ android {
         // Last.fm credentials are supplied locally and never committed.
         buildConfigField("String", "LASTFM_API_KEY", "\"${lastfmApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
         buildConfigField("String", "LASTFM_SECRET", "\"${lastfmSecret.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        // Hotspot remote link is phone/DAP only; off on TV.
+        buildConfigField("String", "HOTSPOT_LINK_TOKEN", "\"\"")
         buildConfigField(
             "String",
             "LISTEN_TOGETHER_SERVER",

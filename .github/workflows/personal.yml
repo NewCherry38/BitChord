@@ -1,0 +1,75 @@
+# Personal build: one phone/DAP APK and one watch APK, signed with the same key
+# so the watch app pairs with the phone app. Phone and DAP install the same APK,
+# so they always carry the same hotspot-link token.
+#
+# Nothing secret lives in the repository. Without repository secrets, every run
+# makes a fresh signing key and token (updating then means uninstalling first).
+# For in-place updates, add these repository secrets once:
+#   PERSONAL_KEYSTORE_B64   base64 of a JKS keystore (alias "personal")
+#   PERSONAL_STORE_PASSWORD its store/key password
+#   HOTSPOT_LINK_TOKEN      any long random letters/digits
+name: Personal build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+          cache: gradle
+
+      - name: Signing and hotspot token
+        env:
+          KEYSTORE_B64: ${{ secrets.PERSONAL_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.PERSONAL_STORE_PASSWORD }}
+          LINK_TOKEN: ${{ secrets.HOTSPOT_LINK_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${KEYSTORE_B64:-}" ] && [ -n "${STORE_PASSWORD:-}" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > personal-release.jks
+            PW="$STORE_PASSWORD"
+          else
+            echo "::notice::No keystore secret: signing with a fresh key for this run."
+            PW="$(openssl rand -hex 16)"
+            keytool -genkeypair -storetype JKS -keystore personal-release.jks \
+              -storepass "$PW" -keypass "$PW" -alias personal -keyalg RSA \
+              -keysize 4096 -validity 36500 -dname "CN=Personal BitChord build"
+          fi
+          echo "::add-mask::$PW"
+          {
+            echo "storeFile=personal-release.jks"
+            echo "storePassword=$PW"
+            echo "keyAlias=personal"
+            echo "keyPassword=$PW"
+          } > keystore.properties
+          TOKEN="${LINK_TOKEN:-$(openssl rand -hex 24)}"
+          echo "::add-mask::$TOKEN"
+          echo "HOTSPOT_LINK_TOKEN=$TOKEN" > local.properties
+
+      - name: Build
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDevRelease :wearos:assembleDevRelease --no-daemon --stacktrace
+
+      - name: Upload phone/DAP APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitchord-phone-and-dap
+          path: app/build/outputs/apk/dev/release/*.apk
+
+      - name: Upload watch APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitchord-watch
+          path: wearos/build/outputs/apk/dev/release/*.apk

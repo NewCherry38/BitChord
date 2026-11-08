@@ -193,7 +193,10 @@ object OutputNegotiator {
         delegateSupportsPcm24: Boolean,
         knownSystemMixerRateHz: Int?,
     ): OutputDescriptor {
-        val advertisesFloat = advertisedEncodings.contains(AudioFormat.ENCODING_PCM_FLOAT)
+        // AudioFlinger always accepts a float track; on a DAP its mixer feeds the
+        // hi-fi DAC, so float is what carries a 24-bit source through intact.
+        val advertisesFloat = advertisedEncodings.contains(AudioFormat.ENCODING_PCM_FLOAT) ||
+            (routeKind == AudioRouting.Kind.WIRED && AudioRouting.isHifiDap)
         val advertisesPcm24 = advertisedEncodings.contains(AudioFormat.ENCODING_PCM_24BIT_PACKED)
 
         // 1. Phone Speaker Safety Rule: Always cap at PCM16

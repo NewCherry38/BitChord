@@ -40,6 +40,7 @@ import com.music.bitchord.playback.ACTION_TOGGLE_SHUFFLE
 import com.music.bitchord.playback.PlaybackService
 import com.music.bitchord.ui.player.artworkMeshColors
 import com.music.bitchord.widget.MediaWidgetSnapshot
+import org.json.JSONObject
 import android.net.Uri
 import androidx.media3.common.C
 import androidx.media3.datasource.DataSource
@@ -129,6 +130,10 @@ object WearBridge {
     @Volatile private var last: Playing? = null
     @Volatile private var art: Art? = null
 
+    /** What a player on the phone's hotspot is playing ([HotspotLink]); wins over [last] while set. */
+    @Volatile private var remote: Playing? = null
+    @Volatile private var remoteVolume: Pair<Int, Int>? = null
+
     /** Null until asked. Kept current by a capability listener after that. */
     @Volatile private var watchReachable: Boolean? = null
     @Volatile private var listening = false
@@ -151,6 +156,77 @@ object WearBridge {
             speed = player.playbackParameters.speed,
             repeatMode = player.repeatMode,
         )
+        schedule(context.applicationContext)
+        HotspotLink.pushState()
+    }
+
+    // ---- Hotspot remote link ----
+
+    /** Player side: the current state as [HotspotLink] sends it to the phone. */
+    internal fun remoteStateJson(context: Context): JSONObject? {
+        val now = last ?: return null
+        val s = now.snapshot
+        val json = JSONObject().put("hasTrack", s.hasTrack)
+        if (!s.hasTrack) return json
+        json.put("mediaId", s.mediaId.orEmpty())
+            .put("title", s.title)
+            .put("artist", s.artist)
+            .put("art", s.artworkUrl.orEmpty())
+            .put("album", now.album.orEmpty())
+            .put("playing", now.playing)
+            .put("advancing", now.advancing)
+            .put("positionMs", now.positionMs)
+            // Clocks differ between devices; the age of the reading travels instead.
+            .put("ageMs", (System.currentTimeMillis() - now.positionAt).coerceAtLeast(0L))
+            .put("durationMs", now.durationMs)
+            .put("speed", now.speed.toDouble())
+            .put("hasPrevious", s.hasPrevious)
+            .put("hasNext", s.hasNext)
+            .put("liked", s.isLiked)
+            .put("canLike", s.canLike)
+            .put("shuffle", s.shuffleEnabled)
+            .put("repeat", now.repeatMode)
+        context.applicationContext.getSystemService(AudioManager::class.java)?.let { audio ->
+            json.put("volume", audio.getStreamVolume(AudioManager.STREAM_MUSIC))
+                .put("volumeMax", audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC))
+        }
+        return json
+    }
+
+    /** Phone side: a state from the player; the watch now shows it instead of the phone's own. */
+    internal fun publishRemote(context: Context, json: JSONObject) {
+        val hasTrack = json.optBoolean("hasTrack")
+        val snapshot = MediaWidgetSnapshot(
+            mediaId = if (hasTrack) json.optString("mediaId") else null,
+            title = json.optString("title"),
+            artist = json.optString("artist"),
+            artworkUrl = json.optString("art").ifBlank { null },
+            isPlaying = json.optBoolean("playing"),
+            hasPrevious = json.optBoolean("hasPrevious"),
+            hasNext = json.optBoolean("hasNext"),
+            isLiked = json.optBoolean("liked"),
+            canLike = json.optBoolean("canLike"),
+            shuffleEnabled = json.optBoolean("shuffle"),
+        )
+        remote = Playing(
+            snapshot = snapshot,
+            album = json.optString("album").ifBlank { null },
+            playing = json.optBoolean("playing"),
+            advancing = json.optBoolean("advancing"),
+            positionMs = json.optLong("positionMs"),
+            positionAt = System.currentTimeMillis() - json.optLong("ageMs"),
+            durationMs = json.optLong("durationMs"),
+            speed = json.optDouble("speed", 1.0).toFloat(),
+            repeatMode = json.optInt("repeat"),
+        )
+        remoteVolume = if (json.has("volume")) json.optInt("volume") to json.optInt("volumeMax") else null
+        schedule(context.applicationContext)
+    }
+
+    /** Phone side: the player left; the watch goes back to the phone's own state. */
+    internal fun clearRemote(context: Context) {
+        remote = null
+        remoteVolume = null
         schedule(context.applicationContext)
     }
 
@@ -474,7 +550,7 @@ object WearBridge {
     }
 
     private suspend fun flush(app: Context) {
-        val now = last
+        val now = remote ?: last
         val request = PutDataMapRequest.create(P.PATH_NOW_PLAYING)
         val map = request.dataMap
         if (now == null || !now.snapshot.hasTrack) {
@@ -506,7 +582,12 @@ object WearBridge {
         }
         map.putBoolean(P.KEY_WATCH_SPEAKER, speaker?.active == true)
         val watchVolume = speaker?.watchVolume
-        if (watchVolume != null) {
+        val playerVolume = remoteVolume?.takeIf { remote != null }
+        if (playerVolume != null) {
+            // The crown turns the hotspot player's volume while it is connected.
+            map.putInt(P.KEY_VOLUME, playerVolume.first)
+            map.putInt(P.KEY_VOLUME_MAX, playerVolume.second)
+        } else if (watchVolume != null) {
             map.putInt(P.KEY_VOLUME, watchVolume.first)
             map.putInt(P.KEY_VOLUME_MAX, watchVolume.second)
         } else {
@@ -615,6 +696,9 @@ class WearCommandService : WearableListenerService() {
         val command = path.substringAfterLast('/')
         val arg = event.data?.let { String(it, Charsets.UTF_8) }.orEmpty()
         WearBridge.onWatchSeen(this)
+
+        // A player on the phone's hotspot takes the transport commands while it is connected.
+        if (HotspotLink.forward(command, arg)) return
 
         when (command) {
             P.CMD_SYNC -> {

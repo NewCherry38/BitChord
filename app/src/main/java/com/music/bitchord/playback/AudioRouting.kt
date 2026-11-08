@@ -55,6 +55,20 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 object AudioRouting {
 
+    /**
+     * True on dedicated music players (DAPs). Their headphone/line outputs often
+     * reach Android as TYPE_BUILTIN_SPEAKER (e.g. FiiO's DAPS firmware exposes no
+     * TYPE_WIRED_HEADPHONES), which would otherwise trip the phone-speaker 16-bit
+     * cap. On these devices the "speaker" route is the hi-fi DAC.
+     */
+    val isHifiDap: Boolean by lazy {
+        val maker = "${Build.MANUFACTURER.orEmpty()} ${Build.BRAND.orEmpty()}".lowercase()
+        val model = Build.MODEL.orEmpty().lowercase()
+        listOf("fiio", "jadeaudio", "hiby", "shanling", "ibasso", "cayin", "astell", "iriver", "questyle")
+            .any { it in maker } ||
+            (maker.contains("sony") && model.startsWith("nw-"))
+    }
+
     /** Output kinds worth telling apart on screen, in the order they are listed. */
     enum class Kind { PHONE, WIRED, USB, BLUETOOTH, HDMI, OTHER }
 
@@ -173,7 +187,7 @@ object AudioRouting {
      * opens. Offering those as a choice is offering silence.
      */
     internal fun kindOf(type: Int): Kind? = when (type) {
-        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> Kind.PHONE
+        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> if (isHifiDap) Kind.WIRED else Kind.PHONE
         AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
         AudioDeviceInfo.TYPE_WIRED_HEADSET,
         AudioDeviceInfo.TYPE_LINE_ANALOG,

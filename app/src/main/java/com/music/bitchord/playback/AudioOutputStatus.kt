@@ -240,6 +240,7 @@ object AudioOutputStatus {
                 AudioDeviceInfo.TYPE_HDMI,
                 AudioDeviceInfo.TYPE_HDMI_ARC,
             ) -> AudioRouting.Kind.HDMI
+            AudioRouting.isHifiDap -> AudioRouting.Kind.WIRED
             else -> AudioRouting.Kind.PHONE
         }
 

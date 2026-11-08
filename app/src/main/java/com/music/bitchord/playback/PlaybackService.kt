@@ -7196,7 +7196,8 @@ class PlaybackService : MediaLibraryService() {
     private fun shouldEnableFloatOutput(): Boolean {
         val activeDevice = resolveActiveOutputDevice()
         val routeKind = resolveActiveRouteKind(activeDevice)
-        val advertisesFloat = activeDevice?.encodings?.contains(AudioFormat.ENCODING_PCM_FLOAT) == true
+        val advertisesFloat = activeDevice?.encodings?.contains(AudioFormat.ENCODING_PCM_FLOAT) == true ||
+            (routeKind == AudioRouting.Kind.WIRED && AudioRouting.isHifiDap)
         val directFloatSupported = audioManager?.let { mgr ->
             DirectAudioProbe.probeDirectSupport(mgr, 48000, 2, activeDevice).supportsFloat
         } ?: false

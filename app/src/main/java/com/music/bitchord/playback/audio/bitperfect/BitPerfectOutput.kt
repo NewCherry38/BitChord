@@ -177,13 +177,8 @@ internal object BitPerfectOutput {
     init {
         // A detached DAC stops its stream at once rather than at the next write.
         UsbDirectDevices.onDetached = { deviceId ->
-            val streaming = synchronized(this) { (active as? UsbDirectTransport)?.takeIf { it.usbDeviceId == deviceId } }
-            streaming?.markDetached()
-            // Pulled while this app drove it: on Qualcomm phones with USB audio
-            // offload the ADSP can be left with an orphaned USB session that makes
-            // every later graph open fail (AGM -131), silencing the whole phone
-            // until the audio HAL restarts. With root, restart it ourselves.
-            if (streaming != null) RootAudioRecovery.restartAudioServerSoon()
+            synchronized(this) { (active as? UsbDirectTransport)?.takeIf { it.usbDeviceId == deviceId } }
+                ?.markDetached()
         }
     }
 
